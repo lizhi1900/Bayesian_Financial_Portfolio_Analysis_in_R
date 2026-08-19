@@ -1,0 +1,88 @@
+---
+title: "Bayesian Portfolio Posterior Return and Risk"
+---
+
+For stocks, the stock returns are assumed to be normally distributed with a mean return vector and a covariance matrix. A portfolio is simply a weight vector tells us to allocate assets. Portfolio return is a weighted sum, portfolio risk is a quadratic form. 
+
+From the assumption, we can obtain posterior mean return vectors and posterior covariance matrices for the stock returns. 
+
+```{r}
+#| warning: false
+rm(list=ls(all=TRUE))
+
+library(ggplot2)
+library(dplyr)
+library(rjags)
+library(tidybayes)
+library(xts)
+library(SharpeR)# data
+
+data(stock_returns)
+r<-stock_returns
+head(r)
+N=nrow(r)
+K=4
+set.seed(123)
+
+model_code <- "
+model {
+  #likelihood
+  for (i in 1:N) {
+    y[i,] ~ dmnorm(mu, Sigma_Inv)
+  }
+
+  # Prior on mean vector
+  for(k in 1:K) {
+    mu[k]~dnorm(0, 1 /100 ^ 2)
+  }
+
+  # Prior on covariance matrix
+  Sigma_Inv ~ dwish(I, K+1)
+}
+"
+data_list <- list(
+  N = N,
+  K=K,
+  I = diag(K),
+  y=r
+)
+model <- jags.model(textConnection(model_code), 
+                    data=data_list, 
+                    n.chains = 5);
+update(model, 1000, progress.bar = "none"); # Burnin for 1000 samples
+
+posterior_sample <- coda.samples(model, 
+                                 variable.names = c("mu","Sigma_Inv"),
+                                 n.iter = 10, progress.bar = "none")
+
+#summary(posterior_sample)
+
+mu_dat <-         posterior_sample %>% spread_draws(mu[i]|i)#tidybayes
+Sigma_Inv_dat <- posterior_sample %>%  tidy_draws(Sigma_Inv)#tidybayes
+```
+With a known portfolio vector, the posterior portfolio return @fig-posterior-portfolio-return  is a weighted sum of posterior stock mean returns. The posterior portfolio risk @fig-posterior-portfolio-risk is a quadratic form of posterior return covariance matrices.
+```{r}
+#| label: fig-posterior-portfolio-return
+#| fig-cap: "Posterior Portfolio Return Distribution"
+#| warning: false
+#portfolio return posterior distribution
+port=c(0.20247656,  0.26518714, 0.3566089,  0.17572744)
+
+er=as.matrix(mu_dat[,4:7])
+port.return=er%*%port
+plot(density(port.return),lwd=4,col=4,main="Porsterior Return Distribution")
+```
+
+```{r}
+#| label: fig-posterior-portfolio-risk
+#| fig-cap: "Posterior Portfolio Risk Distribution"
+#| warning: false
+#portfolio risk posterior distribution
+port.risk=NULL
+for(i in 1:nrow(Sigma_Inv_dat)){
+  covmat = solve(matrix(as.numeric(Sigma_Inv_dat[i,4:19]),ncol=4))
+  port.risk=c(port.risk,port%*%covmat%*%port)
+}
+plot(density(port.risk),lwd=4,col=4,main="Posterior Risk Distribution")
+
+```

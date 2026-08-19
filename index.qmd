@@ -1,0 +1,9 @@
+# Preface {.unnumbered}
+
+This is a tutorial of Bayesian analysis financial applications by R machinery. Some key financial concepts can be worked with Bayesian theory. I can't say anything of stock trading without effort, it's a risky business. Things can go wrong, data aren't obtained correctly. But a correct set of prior beliefs can certainly help.
+
+To learn more about Quarto books visit <https://quarto.org/docs/books>.
+
+
+
+

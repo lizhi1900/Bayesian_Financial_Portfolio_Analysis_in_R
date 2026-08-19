@@ -1,0 +1,122 @@
+---
+title: "Bayesian Posterior Portfolio Frontier"
+---
+
+It was in our financial theory classes, we were introduced to portfolio frontier and optimized portfolio, especially the minimum risk portfolio. But when we applied the theory from class the minimum risk portfolio was not minimum risk at all. 
+
+Think about it in the real world, every time we want to do something a new set of data are deliver to us. Only look at one set of data or one frontier is insufficient. Luckily rJAGS can help us to simulate the full set of posterior distribution of frontiers. We can have an overall view of the portfolio optimization problem. 
+
+We first load the data, and compute the direct estimated portfolio frontier.
+```{r}
+#| warning: false
+rm(list=ls(all=TRUE))
+
+library(ggplot2)
+library(dplyr)
+library(rjags)
+library(tidybayes)
+library(IntroCompFinR )
+library(xts)
+library(SharpeR)# data
+
+data(stock_returns)
+r<-stock_returns
+head(r)
+N=nrow(r)
+K=4
+set.seed(123)
+
+#Direct estimation
+Er=colMeans(r)
+S=cov(r)
+
+ef <- efficient.frontier(Er, S, alpha.min=-2,
+                         alpha.max=1.5, nport=20)
+y= ef$er
+x= ef$sd
+```
+
+We generate posterior distribution of returns and covariance matrix.
+```{r}
+
+model_code <- "
+model {
+  #likelihood
+  for (i in 1:N) {
+    y[i,] ~ dmnorm(mu, Sigma_Inv)
+  }
+  for(k in 1:K) {
+    mu[k]~dnorm(0, 1 /100 ^ 2)
+  }
+
+  # Prior on covariance matrix
+  Sigma_Inv ~ dwish(I, K+1)
+}
+"
+data_list <- list(
+  N = N,
+  K=K,
+  I = diag(K),
+  y=r
+)
+model <- jags.model(textConnection(model_code), 
+                    data=data_list, 
+                    n.chains = 5);
+update(model, 1000, progress.bar = "none"); # Burnin for 1000 samples
+
+posterior_sample <- coda.samples(model, 
+                                 variable.names = c("mu","Sigma_Inv"),
+                                 n.iter = 10, progress.bar = "none")
+
+#summary(posterior_sample)
+
+mu_dat <-         posterior_sample %>% spread_draws(mu[i]|i)#tidybayes
+Sigma_Inv_dat <- posterior_sample %>%  tidy_draws(Sigma_Inv)#tidybayes
+```
+
+Construct all frontiers from the posterior distribution. 
+```{r}
+#Posterior frontiers
+efr=NULL
+efs=NULL
+n=nrow(mu_dat)
+m=20
+for(i in 1:n){
+  er =as.numeric(mu_dat[i,4:7])
+  covmat = solve(matrix(as.numeric(Sigma_Inv_dat[i,4:19]),ncol=4))
+
+  # compute portfolio frontier
+  ef <- efficient.frontier(er, covmat, alpha.min=-2,
+                         alpha.max=1.5, nport=m)
+ efr=c(efr, ef$er)
+ efs=c(efs, ef$sd)
+}
+```
+
+Plot the posterior frontiers.
+```{r}
+#| label: fig-frontier
+#| fig-cap: "Posterior frontier Distribution"
+#| warning: false
+ggplot() +
+  # Plot posterior sample densities
+  geom_path(
+    aes(x = efs, y = efr,group = rep(1:n, each = m),linetype = "Posterior frontiers" ),
+    color = "gray",
+    alpha = 0.5
+  ) +
+ 
+  # Plot posterior expected density
+  geom_path(
+    aes(x = x, y =y,linetype = "Direct estimated frontier" ),
+    color = "black"
+  ) + labs(linetype ="")+ #"Reference Lines"
+
+  # Labels and theme
+  labs(
+    x = "Risk",
+    y = "Expected Return"
+  )+theme(legend.position = "top")
+
+```
+@fig-frontier The minimum risk portfolio from direct estimation (black curve) has daily return around 0.00025. But our posterior frontiers show that many minimum risk portfolios have daily return less than 0.00025 or lower than zero. We cannot reject Hypothesis that minimum risk portfolio return is less than 0. 

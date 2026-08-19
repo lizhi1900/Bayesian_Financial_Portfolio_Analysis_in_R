@@ -1,0 +1,130 @@
+---
+title: "Bayesian Market Maker"
+---
+https://github.com/mmargenot/machine-learning-market-maker/
+
+I adopted this code from link above. At first we need to define some global variables, define how to get prices and volatility. Price distribution and prices the market maker produced are declared as vectors. 
+```{r}
+
+# Load required libraries
+#library(ggplot2)
+#library(quantmod)
+#library(dplyr)
+
+#self.setSymbol <- StockTicker
+setAlpha <- .05
+setNoise <- 3
+
+
+#Get initial price (placeholder)
+getInitialPrice = function() {
+ #Check google finance and get current price
+ return(100) # placeholder value
+}
+
+# Get volatility (placeholder)
+getVolatility = function() {
+  # Check google finance and calculate volatility
+  return(0.05) # placeholder value
+}
+
+# Initialize the distribution
+Distribution <- list() # Distribution is a list with Price : Probability(Price)
+TruePrice <- c()
+```
+
+Compute the global variables to get initialized. 
+```{r}
+
+V0 <- getInitialPrice() # Checks google finance and gets price
+vol <- getVolatility() # Calculates volatility from google finance
+
+Vmin <- V0 - 4 * vol * V0
+Vmax <- V0 + 4 * vol * V0 - 0.01
+
+V <- 0
+i <- 0
+while((Vmin + i) <= Vmax) {
+  V <- Vmin + i
+  Distribution[[round(V, 2)]] <- pnorm(-4 * vol * V0 + i + 0.01, 0, vol * V0) - pnorm(-4 * vol * V0 + i, 0, vol * V0)
+
+  i <- i + 0.01
+}
+
+Pb <- V0 - vol * V0 * 0.5
+Pa <- V0 + vol * V0 * 0.5
+
+TruePrice <- c(TruePrice, V0)
+```
+
+Now put to work. Every time it received an order, it will update price distribution and bid/ask prices. Market making is all about give price for trading.  
+```{r}
+# Update the probability densities
+updateDensity = function(OrderSide) {
+  if (OrderSide == "SELL") {
+    for (price in names(Distribution)) {
+      if (as.numeric(price) <= Pb) {
+        post <- (1 - setAlpha) * 0.5 + setAlpha * pnorm(Pb - as.numeric(price), 0, setNoise * V0)
+        Distribution[[price]] <- post * Distribution[[price]] / 0.5
+          } else {
+        post <- (1 - setAlpha) * 0.5 + setAlpha * (1 - pnorm(as.numeric(price) - Pb, 0, setNoise * V0))
+        Distribution[[price]] <- post * Distribution[[price]] / 0.5
+          }
+        }
+      } else {
+    for (price in names(Distribution)) {
+          if (as.numeric(price) <= Pa) {
+        post <- (1 - setAlpha) * 0.5 + setAlpha * (1 - pnorm(Pa - as.numeric(price), 0, setNoise * V0))
+        Distribution[[price]] <- post * Distribution[[price]] / 0.5
+          }
+        }
+      }
+    }
+#updateDensity("SELL") 
+
+# Update the bid-ask spread
+updateSpread = function() {
+  cumSum1 <- 0
+  cumSum2 <- 0
+
+  for (price in names(Distribution)) {
+    if (as.numeric(price) <= Pb) {
+      a <- Pb - as.numeric(price)
+      cumSum1 <- cumSum1 + (0.5 - 0.5 * setAlpha + setAlpha * pnorm(a, 0, setNoise * V0)) *
+        Distribution[[price]] * as.numeric(price)
+    } else {
+      a <- as.numeric(price) - Pb
+      cumSum2 <- cumSum2 + (0.5 - 0.5 * setAlpha + setAlpha * (1 - pnorm(a, 0, setNoise * V0))) *
+        Distribution[[price]] * as.numeric(price)
+    }
+  }
+
+  newPb <- 2 * (cumSum1 + cumSum2)
+
+  cumSum1 <- 0
+  cumSum2 <- 0
+
+  for (price in names(Distribution)) {
+    if (as.numeric(price) <= Pa) {
+      a <- Pa - as.numeric(price)
+      cumSum1 <- cumSum1 + (0.5 - 0.5 * setAlpha + setAlpha * (1 - pnorm(a, 0, setNoise * V0))) *
+          Distribution[[price]] * as.numeric(price)
+      } else {
+        a <- as.numeric(price) - Pa
+        cumSum2 <- cumSum2 + (0.5 - 0.5 * setAlpha + setAlpha * pnorm(a, 0, setNoise * V0)) *
+          Distribution[[price]] * as.numeric(price)
+      }
+    }
+
+  newPa <- 2 * (cumSum1 + cumSum2)
+  Pb <- newPb
+  Pa <- newPa
+
+  TruePrice <- c(TruePrice, (Pa + Pb)/2) # Add the true price to our list
+  return(list(Pa, Pb)) # Returns Pa and Pb so that we can input the new orders
+}
+
+ 
+```
+
+How about include other price series, like price from competitors, as a calibration into computation. The code is just a workflow, we can use other Bayesian estimators for the distribution and many other things.

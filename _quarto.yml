@@ -1,0 +1,44 @@
+project:
+  type: book
+  output-dir: docs
+  
+execute: 
+  warning: FALSE
+  message: FALSE
+  cache: true
+
+comments:
+  hypothesis: 
+    theme: clean
+
+book:
+  title: "Bayesian Financial Portfolio Analysis in R"
+  author: "Li, Zhi"
+  date: today
+  chapters:
+    - index.qmd
+    - b01.qmd
+    - b02.qmd
+    - b03.qmd
+    - b04.qmd
+    - b05.qmd
+    - b06.qmd
+
+format:
+  html:
+    theme: 
+      light: cosmo
+      dark: darkly
+    code-fold: true
+    code-tools: true
+    code-overflow: wrap
+    number-depth: 4
+    
+    include-in-header:
+      - file: github-corner.html
+    code-link: true
+      
+  pdf:
+    documentclass: scrreprt
+
+editor: source

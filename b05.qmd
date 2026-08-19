@@ -1,0 +1,95 @@
+---
+title: "Hilbert Space Approximated Price Prediction"
+---
+https://juanitorduz.github.io/hsgp_intro/
+
+I don't want to go over any math but to keep very thing simple. If you want to have a more detailed introduction you can read materials from link above. The data I use I have uploaded them to github repo. After loaded the data I just take 30 data points, use 20 data points in the middle for model building, first 5 data points to test back casting,  and last 5 data points to test forecasting. The price data are logged, but for analysis I will use exponential function to get them back as showing on plotting.
+```{r}
+#| warning: false
+library(ggplot2)
+library(tidyverse)
+library(tidybayes)
+require(MASS)
+require(rjags)
+rm(list=ls(all=TRUE))
+
+set.seed(1234)
+setwd("C:\\tuDrive2026\\Bayesian-Financial-Portfolio-Analysis-in-R\\")
+BBBB<-read.csv("BBBB.csv")
+BBBB[1:6,]
+y <- log(tail(BBBB$X601857.Close,30))
+x <-seq(-.2,1.2,length.out=30)
+df_obs <- data.frame(x = x, y_obs = y)
+n <- length(x)
+```
+
+The $phi$ matrix does not depend on the data, it needs to be imported into JAG. For model building, the simple formulas are from the link above. I just let JAG outputs some predictions collect them for analysis.  
+```{r}
+
+m=20 
+L=2
+
+phi=sqrt(1/L)*sin(outer(x+L,pi*1:m,"*")/2/L)
+
+gp_model <- '
+model{
+
+  for(i in 1:m){
+    S[i]=a^2*sqrt(2*pi)*l^1*exp(-.5*l^2*((i)*pi/2/L)^2)
+    beta[i] ~ dnorm(0,1);
+  }
+
+  gp <- phi %*% (sqrt(S)*beta );
+
+  for(i in 6:25){
+    y[i]~dnorm(gp[i],sigma_y^-2);
+
+  }
+  for(i in 1:n){
+    y_pred[i]~dnorm(gp[i],sigma_y^-2);
+  }
+  a ~ dgamma(a1,b1)#amplitude 
+  l ~ dgamma(a2,b2)#length_scale
+  sigma_y ~  dt(0,10^-2,1)T(0,)#error term 
+
+}'
+
+
+data_list<-list(y = y, pi = pi, m = m, L=L,
+                a1=8, b1=5, a2=1, b2=1,
+                phi=phi,n=n)
+                  
+##parameters to save
+jags_pars <- c("y_pred") #
+ 
+model <- jags.model(textConnection(gp_model), data=data_list, n.chains = 5)
+    
+update(model, 2000, progress.bar = "none"); # Burnin for 1000 samples
+
+posterior_sample <- coda.samples(model, 
+                    variable.names = jags_pars ,                   
+                    n.iter = 400, 
+                    progress.bar = "none")
+
+```
+As we see @fig-gp, data points on left-hand-side of blue vertical line are for test back casting, data points on right-hand-side of orange vertical line are for test forecasting. The blue band is 95% confidence interval for prediction. The confidence interval does not cover testing data properly, and the interval is too wide. We may want to use the model to predict stock returns which are more likely to be normally distributed.    
+```{r}
+#| label: fig-gp
+#| fig-cap: "Hilbert Space Approximated Gaussian Process Price Prediction"
+#| warning: false
+out=summary(posterior_sample)
+lower=out$quantiles[,1]
+upper=out$quantiles[,5]
+bands <- data.frame(x=x, lower=lower,upper=upper)
+
+ggplot() +
+  geom_point(data = df_obs, aes(x = x, y = exp(y_obs))) +
+  geom_line(data = df_obs, aes(x = x, y = exp(y_obs)), color = "black", size = 1)+
+  geom_ribbon(data=bands,aes(x=x,ymin = exp(lower), ymax = exp(upper)), alpha = 0.3,fill = "blue")+
+  geom_vline(xintercept = .01, color = "blue", alpha = 0.3, linetype = "dashed", size = 1)+
+  geom_vline(xintercept = 1, color = "orange", alpha = 0.3, linetype = "dashed", size = 1) +
+  labs(x = "Timepoint",
+       y = "Values") +
+  theme_bw()
+
+```

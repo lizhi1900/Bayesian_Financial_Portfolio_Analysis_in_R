@@ -1,0 +1,102 @@
+---
+title: "Black-Litterman Posterior Predictive"
+---
+Say there are 4 stocks, their daily returns are assumed to be normally distributed with means and a covariance matrix. If someone tell us, there was one day the stocks had a portfolio gained such such return. Should we believe it?
+
+Let's say the portfolio was $(0.20247656,  0.26518714, 0.3566089,  0.17572744)$,  and the portfolio return on that day was $0.01016$. Black-Litterman model says with a known risk free rate and covariance matrix we can compute the stock returns used. We load the data. 
+```{r}
+#| warning: false
+rm(list=ls(all=TRUE))
+library(ggplot2)
+library(dplyr)
+library(rjags)
+library(tidybayes)
+library(xts)
+library(SharpeR)# data
+library(gridExtra)
+
+data(stock_returns)
+r<-stock_returns
+head(r)
+N=nrow(r)
+K=4
+```
+
+Use rJAGS to get posterior distributions of the returns.
+```{r}
+set.seed(123)
+
+model_code <- "
+model {
+  #likelihood
+  for (i in 1:N) {
+    y[i,] ~ dmnorm(mu, Sigma_Inv)
+  }
+
+  # Prior on mean vector
+  for(k in 1:K) {
+    mu[k]~dnorm(0, 1 /100 ^ 2)
+  }
+
+  # Prior on covariance matrix
+  Sigma_Inv ~ dwish(I, K+1)
+}
+"
+data_list <- list(
+  N = N,
+  K=K,
+  I = diag(K),
+  y=r
+)
+model <- jags.model(textConnection(model_code), 
+                    data=data_list, 
+                    n.chains = 5);
+update(model, 1000, progress.bar = "none"); # Burnin for 1000 samples
+
+posterior_sample <- coda.samples(model, 
+                                 variable.names = c("mu","Sigma_Inv"),
+                                 n.iter = 10, progress.bar = "none")
+
+#summary(posterior_sample)
+
+mu_dat <-         posterior_sample %>% spread_draws(mu[i]|i)#tidybayes
+Sigma_Inv_dat <- posterior_sample %>%  tidy_draws(Sigma_Inv)#tidybayes
+```
+Let $x$ be the portfolio vector, $r_x$ be portfolio return, $r_f$ be risk-free-rate, $S$ be covariance matrix of the stock returns. We have:
+$$\lambda=\frac{r_x-r_f}{x^TSx}$$
+Let $r$ be computed stock returns:
+$$r=\lambda Sx+r_f$$
+```{r}
+#Black-Litterman Model
+S=cov(r)
+risk.free.rate=.01 #risk free rate
+port=c(0.20247656,  0.26518714, 0.3566089,  0.17572744)#envelope portfolio
+port.r=0.01016 #portfolio reurn
+var_port=port%*%S%*%port
+lambda=as.numeric((port.r-risk.free.rate)/var_port)
+implied.r=lambda*S%*%port+risk.free.rate
+implied.r
+```
+We plot computed returns against posterior return distributions. We can see the computed returns are very far away from posterior return distributions. We can conclude to get such high return from the stocks was not plausible. 
+```{r}
+#posterior predictive plot
+
+posterior_ret <- rename_with(mu_dat, function(x) paste0("Posterior_return_", x))#dplyr
+names(posterior_ret)
+
+# Density curves
+p1<-ggplot(posterior_ret, aes(x=Posterior_return_1)) + geom_density(alpha=.5)+
+    geom_vline(aes(xintercept=mean(implied.r[1,1], na.rm=T)),   
+               color="red", linetype="dashed", size=1)
+p2<-ggplot(posterior_ret, aes(x=Posterior_return_2)) + geom_density(alpha=.5)+
+    geom_vline(aes(xintercept=mean(implied.r[1,1], na.rm=T)),   
+               color="red", linetype="dashed", size=1)
+p3<-ggplot(posterior_ret, aes(x=Posterior_return_3)) + geom_density(alpha=.5)+
+    geom_vline(aes(xintercept=mean(implied.r[1,1], na.rm=T)),   
+               color="red", linetype="dashed", size=1)
+p4<-ggplot(posterior_ret, aes(x=Posterior_return_4)) + geom_density(alpha=.5)+
+    geom_vline(aes(xintercept=mean(implied.r[1,1], na.rm=T)),   
+               color="red", linetype="dashed", size=1)
+
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
